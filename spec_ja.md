@@ -480,15 +480,15 @@ SP は、base64 のようなバイナリからテキストに変換するエン�
 SP は要求するシークレットのキーと値に関する要件をドキュメント中で告知すべきである(SHALL)。
 CO は要求したシークレットのパススルーを許可すべきである(SHALL)。
 CO は同じシークレットを全 RPC に渡しても良い(MAY)が、しかしながら SP が期待する全てのユニークシークレット用のキーは全 CSI 操作を通して単一でなければならない(MUST)。
-This information is sensitive and MUST be treated as such (not logged, etc.) by the CO.
-この情報はセンシティブで、CO によってそのように扱われなければならない(MUST)。
+この情報はセンシティブで、(ログに残さないなど) CO によってそのように扱われなければならない(MUST)。
 
-### Identity Service RPC
+### アイデンティティサービス RPC
 
-Identity service RPCs allow a CO to query a plugin for capabilities, health, and other metadata.
+アイデンティティサービス RPC は CO がプラグインに機能、健全性、他のメタデータを問い合わせる事を可能にする。
 The general flow of the success case MAY be as follows (protos illustrated in YAML for brevity):
+成功ケースの一般的なフローは以下 (簡潔に YAML で図示されたプロトコル) のようになりうる (MAY)。
 
-1. CO queries metadata via Identity RPC.
+1. CO はアイデンティティ RPC 経由でメタデータを問い合わせる。
 
 ```
    # CO --(GetPluginInfo)--> Plugin
@@ -500,7 +500,7 @@ The general flow of the success case MAY be as follows (protos illustrated in YA
         baz: qaz
 ```
 
-2. CO queries available capabilities of the plugin.
+2. CO はプラグインで利用可能な機能を問い合わせる。
 
 ```
    # CO --(GetPluginCapabilities)--> Plugin
@@ -511,7 +511,7 @@ The general flow of the success case MAY be as follows (protos illustrated in YA
            type: CONTROLLER_SERVICE
 ```
 
-3. CO queries the readiness of the plugin.
+3. CO はプラグインの準備状況を問い合わせる。
 
 ```
    # CO --(Probe)--> Plugin
@@ -544,14 +544,15 @@ message GetPluginInfoResponse {
 }
 ```
 
-##### GetPluginInfo Errors
+##### GetPluginInfo エラー
 
-If the plugin is unable to complete the GetPluginInfo call successfully, it MUST return a non-ok gRPC code in the gRPC status.
+プラグインが GetPluginInfo コールを無事に完了できない場合、gRPC ステータス中に non-ok gRPC コードを返却しなければならない(MUST)。
 
 #### `GetPluginCapabilities`
 
-This REQUIRED RPC allows the CO to query the supported capabilities of the Plugin "as a whole": it is the grand sum of all capabilities of all instances of the Plugin software, as it is intended to be deployed.
-All instances of the same version (see `vendor_version` of `GetPluginInfoResponse`) of the Plugin SHALL return the same set of capabilities, regardless of both: (a) where instances are deployed on the cluster as well as; (b) which RPCs an instance is serving.
+この 必須 RPC は CO がプラグインがサポートする機能を「総じて」問い合わせる事を可能にする: これは、(デプロイ用であるため) プラグインソフトウェアの全インスタンスの全機能の総計である。
+プラグインの同じバージョンの全インスタンス (`GetPluginInfoResponse` の `vendor_version` 参照)は
+(a)クラスタ上でインスタンスがデプロイされる場所と同様に (b)インスタンスが提供する RPC の種類の両方の機能と準備状況の同じセットを返却するべきである(SHALL)。
 
 ```protobuf
 message GetPluginCapabilitiesRequest {
@@ -644,25 +645,25 @@ message PluginCapability {
 }
 ```
 
-##### GetPluginCapabilities Errors
+##### GetPluginCapabilities エラー
 
-If the plugin is unable to complete the GetPluginCapabilities call successfully, it MUST return a non-ok gRPC code in the gRPC status.
+プラグインが GetPluginCapabilities コールを無事に完了できない場合、gRPC ステータス中で non-ok gRPC コードを返却すべきである(MUST)。
 
 #### `Probe`
 
-A Plugin MUST implement this RPC call.
-The primary utility of the Probe RPC is to verify that the plugin is in a healthy and ready state.
-If an unhealthy state is reported, via a non-success response, a CO MAY take action with the intent to bring the plugin to a healthy state.
-Such actions MAY include, but SHALL NOT be limited to, the following:
+プラグインはこの RPC コールを実装しなければならない(MUST)。
+Probe RPC の第一の用途は、プラグインが健全で準備完了な状態である事を検証することである。
+(不成功応答を経由して) 不健全状態が報告された場合、CO はプラグインを健全な状態にする為にアクションを起こしても良い(MAY)。
+このようなアクションは以下を含んでも良い(MAY)が、限定されるべきではない(SHALL NOT):
 
-* Restarting the plugin container, or
-* Notifying the plugin supervisor.
+* プラグインコンテナの再起動
+* プラグインスーパーバイザーへの通知
 
-The Plugin MAY verify that it has the right configurations, devices, dependencies and drivers in order to run and return a success if the validation succeeds.
-The CO MAY invoke this RPC at any time.
-A CO MAY invoke this call multiple times with the understanding that a plugin's implementation MAY NOT be trivial and there MAY be overhead incurred by such repeated calls.
-The SP SHALL document guidance and known limitations regarding a particular Plugin's implementation of this RPC.
-For example, the SP MAY document the maximum frequency at which its Probe implementation SHOULD be called.
+プラグインは、稼働の為に正しい設定、デバイス、依存関係、ドライバがある事を検証し、検証が無事完了した場合には成功を返却しても良い(MAY)。
+CO はこの RPC をいつでも実行して良い(MAY)。
+CO は、プラグインの実装が些細なものではない可能性があり(MAY NOT)、このような連続コールによりオーバーヘッドを生じるかもしれない(MAY)事を理解しつつ、このコールを複数回呼び出しても良い(MAY)。
+SP は特定のプラグインの本 RPC の実装に関してガイダンスと既知の制限事項を文書化すべきである(SHALL)。
+例えば、SP は、その Probe 実装がコールされるべき(SHOULD)最大頻度について文書化しても良い(MAY)。
 
 ```protobuf
 message ProbeRequest {
@@ -694,16 +695,17 @@ message ProbeResponse {
 }
 ```
 
-##### Probe Errors
+##### Probe エラー
 
-If the plugin is unable to complete the Probe call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが Probe コールを無事に完了できない場合、gRPC ステータス中で non-ok gRPC コードを返却すべきである(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+もし以下で定義された条件に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO はこの gRPC エラーコードに遭遇した場合、指定されたエラーリカバリー動作を実装しなければならない(MUST)。
+
+| 条件 | gRPC コード | 説明 | リカバリー動作 |
 |-----------|-----------|-------------|-------------------|
-| Plugin not healthy | 9 FAILED_PRECONDITION | Indicates that the plugin is not in a healthy/ready state. | Caller SHOULD assume the plugin is not healthy and that future RPCs MAY fail because of this condition. |
-| Missing required dependency | 9 FAILED_PRECONDITION | Indicates that the plugin is missing one or more required dependency. | Caller MUST assume the plugin is not healthy. |
+| プラグインが不健全 | 9 FAILED_PRECONDITION | プラグインが健全/準備完了状態にない事を示す。 | 呼び出し元は、プラグインが健全でなく、それゆえ今後の RPC がこの状態の為に失敗するかもしれない(MAY)ことを想定すべきである(SHALL)。 |
+| 必要な依存性が不足 | 9 FAILED_PRECONDITION | プラグインが１つ以上の必要な依存性を失っている事を示す。 | 呼び出し元は、プラグインが不健全である事を想定しなければならない(MUST)。 |
 
 
 ### Controller Service RPC
