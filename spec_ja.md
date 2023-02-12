@@ -708,24 +708,25 @@ CO はこの gRPC エラーコードに遭遇した場合、指定されたエ�
 | 必要な依存性が不足 | 9 FAILED_PRECONDITION | プラグインが１つ以上の必要な依存性を失っている事を示す。 | 呼び出し元は、プラグインが不健全である事を想定しなければならない(MUST)。 |
 
 
-### Controller Service RPC
+### コントローラーサービス RPC
 
 #### `CreateVolume`
 
-A Controller Plugin MUST implement this RPC call if it has `CREATE_DELETE_VOLUME` controller capability.
-This RPC will be called by the CO to provision a new volume on behalf of a user (to be consumed as either a block device or a mounted filesystem).
+`CREATE_DELETE_VOLUME` コントローラー機能を持つ場合、コントローラープラグインは本 RPC を実装しなければならない(MUST)。
+本 RPC は、ユーザの代わりに (ブロックデバイスまたはマウントされたファイルシステムのどちらかとして使用される) 新しいボリュームを用意するため、CO によってコールされる。
 
-This operation MUST be idempotent.
-If a volume corresponding to the specified volume `name` already exists, is accessible from `accessibility_requirements`, and is compatible with the specified `capacity_range`, `volume_capabilities` and `parameters` in the `CreateVolumeRequest`, the Plugin MUST reply `0 OK` with the corresponding `CreateVolumeResponse`.
+本操作は冪等性を持っていなければならない(MUST)。
+もし、指定されたボリューム`名`を関連付けられたボリュームが既に存在し、`accessibility_requirements` からアクセス可能で、`CreateVolumeRequest` 中で指定された `capacity_range`、`volume_capabilities`、`parameters` と互換性がある場合、プラグインは関連する `CreateVolumeResponse` で `0 OK` を応答しなければならない(MUST)。
 
-Plugins MAY create 3 types of volumes:
+プラグインは３種類のボリュームを作成する可能性がある(MAY):
 
-- Empty volumes. When plugin supports `CREATE_DELETE_VOLUME` OPTIONAL capability.
-- From an existing snapshot. When plugin supports `CREATE_DELETE_VOLUME` and `CREATE_DELETE_SNAPSHOT` OPTIONAL capabilities.
-- From an existing volume. When plugin supports cloning, and reports the OPTIONAL capabilities `CREATE_DELETE_VOLUME` and `CLONE_VOLUME`.
+- 空ボリューム。プラグインが `CREATE_DELETE_VOLUME` オプション機能をサポートする場合。
+- 既存スナップショットから。 プラグインが `CREATE_DELETE_VOLUME`、`CREATE_DELETE_SNAPSHOT` オプション機能をサポートする場合。
+- 既存ボリュームから。プラグインがボリューム複製(cloning)をサポートし、`CREATE_DELETE_VOLUME`、`CLONE_VOLUME` オプション機能を報告する場合。
 
-If CO requests a volume to be created from existing snapshot or volume and the requested size of the volume is larger than the original snapshotted (or cloned volume), the Plugin can either refuse such a call with `OUT_OF_RANGE` error or MUST provide a volume that, when presented to a workload by `NodePublish` call, has both the requested (larger) size and contains data from the snapshot (or original volume).
-Explicitly, it's the responsibility of the Plugin to resize the filesystem of the newly created volume at (or before) the `NodePublish` call, if the volume has `VolumeCapability` access type `MountVolume` and the filesystem resize is required in order to provision the requested capacity.
+CO が既存のスナップショットまたはボリュームからボリュームを作成し、要求されたボリュームサイズが元のスナップショットされたボリューム(又は複製されたボリューム)より大きかった場合、プラグインは `OUT_OF_RANGE` エラーでこのような要求を拒否するか、(`NodePublish` コールによりワークロードが示されている場合)要求された(より大きな)サイズでスナップショット(又は元ボリューム)からのデータの両方を持つボリュームを用意しなければならない(MUST)。
+
+明らかに、(ボリュームが `VolumeCapability` アクセスタイプ `MountVolume` を持ち、要求された容量を用意する為にファイルシステムリサイズが要求された場合)`NodePublish` コール時（又はそれ以前）に新規作成されたボリュームのファイルシステムをリサイズする責任はプラグインにあります。
 
 ```protobuf
 message CreateVolumeRequest {
@@ -1174,34 +1175,34 @@ message Topology {
 }
 ```
 
-##### CreateVolume Errors
+##### CreateVolume エラー
 
-If the plugin is unable to complete the CreateVolume call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが無事 CreateVolume コールを完了する事ができない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+以下で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、この gRPC エラーコードに遭遇した場合に指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Source incompatible or not supported | 3 INVALID_ARGUMENT | Besides the general cases, this code MUST also be used to indicate when plugin supporting CREATE_DELETE_VOLUME cannot create a volume from the requested source (`SnapshotSource` or `VolumeSource`). Failure MAY be caused by not supporting the source (CO SHOULD NOT have provided that source) or incompatibility between `parameters` from the source and the ones requested for the new volume. More human-readable information SHOULD be provided in the gRPC `status.message` field if the problem is the source. | On source related issues, caller MUST use different parameters, a different source, or no source at all. |
-| Source does not exist | 5 NOT_FOUND | Indicates that the specified source does not exist. | Caller MUST verify that the `volume_content_source` is correct, the source is accessible, and has not been deleted before retrying with exponential back off. |
-| Volume already exists but is incompatible | 6 ALREADY_EXISTS | Indicates that a volume corresponding to the specified volume `name` already exists but is incompatible with the specified `capacity_range`, `volume_capabilities`, `parameters`, `accessibility_requirements` or `volume_content_source`. | Caller MUST fix the arguments or use a different `name` before retrying. |
-| Unable to provision in `accessible_topology` | 8 RESOURCE_EXHAUSTED | Indicates that although the `accessible_topology` field is valid, a new volume can not be provisioned with the specified topology constraints. More human-readable information MAY be provided in the gRPC `status.message` field. | Caller MUST ensure that whatever is preventing volumes from being provisioned in the specified location (e.g. quota issues) is addressed before retrying with exponential backoff. |
-| Unsupported `capacity_range` | 11 OUT_OF_RANGE | Indicates that the capacity range is not allowed by the Plugin, for example when trying to create a volume smaller than the source snapshot or the Plugin does not support creating volumes larger than the source snapshot or source volume. More human-readable information MAY be provided in the gRPC `status.message` field. | Caller MUST fix the capacity range before retrying. |
+| ソースが非互換か未サポート | 3 INVALID_ARGUMENT | 一般的なケース以外にも、本コードは CREATE_DELETE_VOLUME をサポートするプラグインが要求されたソース(`SnapshotSource` 又は `VolumeSource`)からボリュームを作成できない場合を示す為に使用されなければならない(MUST)。障害はソースをサポートしていない(CO がそのソースを提供してこなかったべきでない(SHOULD NOT))、あるいはソースからの `parameters` と新しいボリューム用に要求されたパラメータの間に互換性がない事に起因する可能性がある(MAY)。より人間が読みやすい情報は、問題がソースなのであれば gRPC `status.message` フィールド内で提供されるべきである(SHOULD)。 | ソース関連の問題の場合、呼び出し元は異なるパラメータ、異なるソース、あるいはソースなしを使用しなければならない(MUST)。 |
+| ソースが存在しない | 5 NOT_FOUND | 指定されたソースが存在しない事を示す。 | 呼び出し元は、急激に時間間隔を伸ばす再試行を行う前に、`volume_content_source` が正しい事、ソースがアクセス可能である事、ソースがまだ削除されていない事を確認しなければならない(MUST)。 |
+| ボリュームは既に存在するが非互換 | 6 ALREADY_EXISTS | 指定されたボリューム`name`に関連するボリュームが既に存在するが、指定された `capacity_range`、`volume_capabilities`、`parameters`、`accessibility_requirements`、`volume_content_source` と互換性がない事を示す。 | 呼び出し元は再試行前に引数を修正するか、異なる`name`を使用しなければならない(MUST)。 |
+| `accessible_topology` 中で用意できない | 8 RESOURCE_EXHAUSTED | `accessible_topology` フィールドが有効であるにも関わらず、指定されたトポロジ成約を用いて新しいボリュームを用意できない事を示す。gRPC `status.message` フィールド内でより人間が読みやすい情報が提供されても良い(MAY)。 | 呼び出し元は、急激に時間間隔を伸ばす再試行を行う前に、指定された場所内でボリュームを阻害するあらゆるもの(例：クォータ問題)が対処されている事を確認しなければならない(MUST)。 |
+| `capacity_range` が未サポート | 11 OUT_OF_RANGE | 容量範囲がプラグインで許可されていない事 (例：ソースのスナップショットより小さいボリューム作成を試みた際、又はプラグインがソースのスナップショットより大きいボリューム作成をサポートしない場合)を示す。gRPC `status.message` フィールド内でより人間が読みやすい情報が提供されても良い(MAY)。 | 呼び出し元は再試行前に容量範囲を修正しなければならない(MUST)。 |
 
 
 #### `DeleteVolume`
 
-A Controller Plugin MUST implement this RPC call if it has `CREATE_DELETE_VOLUME` capability.
-This RPC will be called by the CO to deprovision a volume.
+`CREATE_DELETE_VOLUME` 機能がある場合、コントローラープラグインは本 RPC コールを実装しなければならない(MUST)。
+ボリュームを削除する為、本 RPC は CO によリコールされます。
 
-This operation MUST be idempotent.
-If a volume corresponding to the specified `volume_id` does not exist or the artifacts associated with the volume do not exist anymore, the Plugin MUST reply `0 OK`.
+本操作は冪等性がなければならない(MUST)。
+指定された `volume_id` に関連するボリュームが存在しないか、ボリューに関連するアーティファクトが存在しない場合、プラグインは `0 OK` を返却しなければならない(MUST)。
 
-CSI plugins SHOULD treat volumes independent from their snapshots.
+CSI プラグインはスナップショットから独立してボリュームを扱うべきである(SHOULD)。
 
-If the Controller Plugin supports deleting a volume without affecting its existing snapshots, then these snapshots MUST still be fully operational and acceptable as sources for new volumes as well as appear on `ListSnapshot` calls once the volume has been deleted.
+コントローラープラグインが既存のスナップショットに影響しないボリューム削除をサポートする場合、一旦ボリュームが削除された後、`ListSnapshot` コールで表示されるこれらのスナップショットは依然完全に機能し、新しいボリューム用のソースとして許容されなければならない(MUST)。
 
-When a Controller Plugin does not support deleting a volume without affecting its existing snapshots, then the volume MUST NOT be altered in any way by the request and the operation must return the `FAILED_PRECONDITION` error code and MAY include meaningful human-readable information in the `status.message` field.
+コントローラープラグインが既存のスナップショットに影響しないボリューム削除をサポートする場合、(削除された)ボリュームは要求によるあらゆる手段で変更されるべきでなく(MUST NOT)、操作は `FAILED_PRECONDITION` エラーコードを返却しなければならなず(must)、意味のある人間が読みやすい情報が `status.message` フィールド中に含まれても良い(MAY)。
 
 ```protobuf
 message DeleteVolumeRequest {
@@ -1220,30 +1221,30 @@ message DeleteVolumeResponse {
 }
 ```
 
-##### DeleteVolume Errors
+##### DeleteVolume エラー
 
-If the plugin is unable to complete the DeleteVolume call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが DeleteVolume コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Volume in use | 9 FAILED_PRECONDITION | Indicates that the volume corresponding to the specified `volume_id` could not be deleted because it is in use by another resource or has snapshots and the plugin doesn't treat them as independent entities. | Caller SHOULD ensure that there are no other resources using the volume and that it has no snapshots, and then retry with exponential back off. |
+| ボリュームが使用中 | 9 FAILED_PRECONDITION | 指定された `volume_id` に関連するボリュームが別のリソースで使用中か、スナップショットがありプラグインがボリュームとスナップショットを独立して扱わない為に、プラグインがそのボリュームを削除できない事を示す。 | 呼び出し元は、ボリュームを使用している他のリソースがない事、スナップショットがない事を保証し、その後急激に時間間隔を伸ばす再試行を行うべきである(SHOULD)。 |
 
 
 #### `ControllerPublishVolume`
 
-A Controller Plugin MUST implement this RPC call if it has `PUBLISH_UNPUBLISH_VOLUME` controller capability.
-This RPC will be called by the CO when it wants to place a workload that uses the volume onto a node.
-The Plugin SHOULD perform the work that is necessary for making the volume available on the given node.
-The Plugin MUST NOT assume that this RPC will be executed on the node where the volume will be used.
+コントローラープラグインは、`PUBLISH_UNPUBLISH_VOLUME` コントローラー機能を持つ場合、この RPC コール実装しなければならない(MUST)。
+ボリュームを使用するワークロードをノード上に配置する際、CO によってこの RPC は コールされる。
+プラグインは、与えられたノード上で利用可能なボリュームを作成する為に必要な作業を実行するべきである(SHOULD)。
+プラグインは、本 RPC がボリュームが使用されるノード上で実行される事を前提にしてはならない(MUST NOT)。
 
-This operation MUST be idempotent.
-If the volume corresponding to the `volume_id` has already been published at the node corresponding to the `node_id`, and is compatible with the specified `volume_capability` and `readonly` flag, the Plugin MUST reply `0 OK`.
+本操作は冪等性を持たなければならない(MUST)。
+`volume_id` に関連付けられたボリュームが `node_id` に関連付けられたノード上で既に公開されて(published)おり、指定された `volume_capability` と `readonly` フラグに互換性がある場合、プラグインは `0 OK` を返却しなければならない(MUST)。
 
-If the operation failed or the CO does not know if the operation has failed or not, it MAY choose to call `ControllerPublishVolume` again or choose to call `ControllerUnpublishVolume`.
+操作が失敗するか、CO は操作が失敗したかしなかったかが分からない場合、CO は `ControllerPublishVolume` を再度コールする事を選択するか、`ControllerUnpublishVolume` をコールする事を選択しても良い(MAY)。
 
-The CO MAY call this RPC for publishing a volume to multiple nodes if the volume has `MULTI_NODE` capability (i.e., `MULTI_NODE_READER_ONLY`, `MULTI_NODE_SINGLE_WRITER` or `MULTI_NODE_MULTI_WRITER`).
+CO は、ボリュームが `MULTI_NODE` 機能(つまり、`MULTI_NODE_READER_ONLY`、`MULTI_NODE_SINGLE_WRITER`、`MULTI_NODE_MULTI_WRITER`)を持つ場合、複数ノードにボリュームを公開する為に本 RPC をコールしても良い(MAY)。
 
 ```protobuf
 message ControllerPublishVolumeRequest {
@@ -1297,34 +1298,34 @@ message ControllerPublishVolumeResponse {
 }
 ```
 
-##### ControllerPublishVolume Errors
+##### ControllerPublishVolume エラー
 
-If the plugin is unable to complete the ControllerPublishVolume call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが ControllerPublishVolume コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Volume does not exist | 5 NOT_FOUND | Indicates that a volume corresponding to the specified `volume_id` does not exist. | Caller MUST verify that the `volume_id` is correct and that the volume is accessible and has not been deleted before retrying with exponential back off. |
-| Node does not exist | 5 NOT_FOUND | Indicates that a node corresponding to the specified `node_id` does not exist. | Caller MUST verify that the `node_id` is correct and that the node is available and has not been terminated or deleted before retrying with exponential backoff. |
-| Volume published but is incompatible | 6 ALREADY_EXISTS | Indicates that a volume corresponding to the specified `volume_id` has already been published at the node corresponding to the specified `node_id` but is incompatible with the specified `volume_capability` or `readonly` flag . | Caller MUST fix the arguments before retrying. |
-| Volume published to another node | 9 FAILED_PRECONDITION | Indicates that a volume corresponding to the specified `volume_id` has already been published at another node and does not have MULTI_NODE volume capability. If this error code is returned, the Plugin SHOULD specify the `node_id` of the node at which the volume is published as part of the gRPC `status.message`. | Caller SHOULD ensure the specified volume is not published at any other node before retrying with exponential back off. |
-| Max volumes attached | 8 RESOURCE_EXHAUSTED | Indicates that the maximum supported number of volumes that can be attached to the specified node are already attached. Therefore, this operation will fail until at least one of the existing attached volumes is detached from the node. | Caller MUST ensure that the number of volumes already attached to the node is less then the maximum supported number of volumes before retrying with exponential backoff. |
+| ボリュームが存在しない | 5 NOT_FOUND | 指定された `volume_id` に関連付けられたボリュームが存在しない事を示す。 | 呼び出し元は、急激に時間間隔を伸ばす再試行を行う前に `volume_id` が正しい事、ボリュームがアクセス可能で、ボリュームが削除されていない事を確認しなければならない(MUST)。 |
+| ノードが存在しない | 5 NOT_FOUND | 指定された `node_id` に関連付けられたノードが存在しない事を示す。 | 呼び出し元は、急激に時間間隔を伸ばす再試行を行う前に、`node_id` が正しい事、ノードが利用可能で、ノードが停止又は削除されていない事を確認しなければならない(MUST)。 |
+| ボリュームは公開されているが互換性がない | 6 ALREADY_EXISTS | 指定された `volume_id` が関連付けられたボリュームが指定された `node_id` が関連付けられたノードに対し既に公開されている(published)が、指定された `volume_capability` あるいは `readonly` フラグと互換性がない事を示す。 | 呼び出し元は再試行前に引数を修正しなければならない(MUST)。 |
+| ボリュームは別ノードに公開されている | 9 FAILED_PRECONDITION | 指定された `volume_id` に関連付けられたボリュームが別ノードに対して既に公開されて(published)おり、ボリュームが MULTI_NODE ボリューム機能を持たない事を示す。本エラーコードが返却された場合、プラグインは gRPC `status.message` の一部として、ボリュームが公開されているノードの `node_id` を指定すべきである(SHOULD)。 | 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元は指定されたボリュームは他のどのノードに対しても公開されていない事を確認しなければならない(SHOULD)。 |
+| 最大アタッチボリューム数 | 8 RESOURCE_EXHAUSTED | 特定ノードにアタッチ可能なボリューム最大数が既にアタッチ済みである事を示す。それゆえ、少なくとも１つの既存アタッチ済みボリュームがノードからデタッチされるまで本操作は失敗する。| 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元はノードにアタッチ済みのボリューム数がボリューム最大数より少ない事を確認しなければならない(MUST)。 |
 
 #### `ControllerUnpublishVolume`
 
-Controller Plugin MUST implement this RPC call if it has `PUBLISH_UNPUBLISH_VOLUME` controller capability.
-This RPC is a reverse operation of `ControllerPublishVolume`.
-It MUST be called after all `NodeUnstageVolume` and `NodeUnpublishVolume` on the volume are called and succeed.
-The Plugin SHOULD perform the work that is necessary for making the volume ready to be consumed by a different node.
-The Plugin MUST NOT assume that this RPC will be executed on the node where the volume was previously used.
+`PUBLISH_UNPUBLISH_VOLUME` コントローラー機能を持つ場合、コントローラープラグインは本 RPC コールを実装しなければならない(MUST)
+本 RPC は `ControllerPublishVolume` の逆操作である。
+本 RPC は、当該ボリュームにおける全ての  `NodeUnstageVolume` と `NodeUnpublishVolume` がコールされ、成功した後に呼ばれなければならない(MUST)。
+プラグインは、当該ボリュームが別ノードで使用可能状態にする為に必要な作業を実行すべきである(SHOULD)。
+プラグインは、当該ボリュームが以前使用されていたノード上で本 RPC が実行されたとみなすべきではない(MUST NOT)。
 
-This RPC is typically called by the CO when the workload using the volume is being moved to a different node, or all the workload using the volume on a node has finished.
+本 RPC は、通常当該ボリュームを使用するワークロードが異なるノード上に移動される際、あるいはノード上で当該ボリュームを使用する全ワークロードが終了する際に CO によりコールされる。
 
-This operation MUST be idempotent.
-If the volume corresponding to the `volume_id` is not attached to the node corresponding to the `node_id`, the Plugin MUST reply `0 OK`.
-If the volume corresponding to the `volume_id` or the node corresponding to `node_id` cannot be found by the Plugin and the volume can be safely regarded as ControllerUnpublished from the node, the plugin SHOULD return `0 OK`.
-If this operation failed, or the CO does not know if the operation failed or not, it can choose to call `ControllerUnpublishVolume` again.
+本操作は冪等性を持つべきである(MUST)。
+`volume_id` に関連付けられた当該ボリュームが `node_id` に関連付けられたノードにアタッチされていない場合、プラグインは `0 OK` を返却しなければならない(MUST)。
+`volume_id` に関連付けられたボリュームあるいは `node_id` に関連付けられたノードがプラグインにより見つからず、ボリュームがノード上で安全に ControllerUnpublished されたと見なされる場合、プラグインは `0 OK` を返却すべきである(SHOULD)。
+本操作が失敗した、あるいは本操作が失敗したかどうかを CO が把握していない場合、CO は `ControllerUnpublishVolume` を再コールしても良い。
 
 ```protobuf
 message ControllerUnpublishVolumeRequest {
@@ -1351,27 +1352,28 @@ message ControllerUnpublishVolumeResponse {
 }
 ```
 
-##### ControllerUnpublishVolume Errors
+##### ControllerUnpublishVolume エラー
 
-If the plugin is unable to complete the ControllerUnpublishVolume call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが ControllerUnpublishVolume コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Volume does not exist and volume not assumed ControllerUnpublished from node | 5 NOT_FOUND | Indicates that a volume corresponding to the specified `volume_id` does not exist and is not assumed to be ControllerUnpublished from node corresponding to the specified `node_id`. | Caller SHOULD verify that the `volume_id` is correct and that the volume is accessible and has not been deleted before retrying with exponential back off. |
-| Node does not exist and volume not assumed ControllerUnpublished from node  | 5 NOT_FOUND | Indicates that a node corresponding to the specified `node_id` does not exist and the volume corresponding to the specified `volume_id` is not assumed to be ControllerUnpublished from node. | Caller SHOULD verify that the `node_id` is correct and that the node is available and has not been terminated or deleted before retrying with exponential backoff. |
+| ボリュームが存在せず、ボリュームがノードから ControllerUnpublished されたと見なせない | 5 NOT_FOUND | 指定された `volume_id` に関連付けられたボリュームが存在せず、指定された `node_id` に関連付けられたノードから ControllerUnpublished されたとも見なせない事を示す。 | 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元は `volume_id` が正しく、当該ボリュームがアクセス可能で削除されていない事を検証すべきである(SHOULD)。 |
+| ノードが存在せず、ボリュームがノードから ControllerUnpublished されたと見なせない | 5 NOT_FOUND | 指定された `node_id` に関連付けられたノードが存在せず、指定された `volume_id` に関連付けられたボリュームがノードから ControllerUnpublished されたとも見なせない事を示す。 | 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元は `node_id` が正しく、当該ノードが利用可能で停止・削除されていない事を検証すべきである(SHOULD)。 |
 
 
 #### `ValidateVolumeCapabilities`
 
-A Controller Plugin MUST implement this RPC call.
-This RPC will be called by the CO to check if a pre-provisioned volume has all the capabilities that the CO wants.
-This RPC call SHALL return `confirmed` only if all the volume capabilities specified in the request are supported (see caveat below).
-This operation MUST be idempotent.
+コントローラープラグインは本 RPC コールを実装しなければならない(MUST)。
+本 RPC は事前にプロビジョンされたボリュームが CO の求める全ケーパビリティを持っているかどうか確認する為に CO によりコールされる。
+本 RPC コールは、要求で指定されたのボリュームケーパビリティが全てサポートされる場合のみ `confirmed` を返却すべきである(SHALL)(下記警告参照)。
+本操作は冪等性を持つべきである(MUST)。
 
-NOTE: Older plugins will parse but likely not "process" newer fields that MAY be present in capability-validation messages (and sub-messages) sent by a CO that is communicating using a newer, backwards-compatible version of the CSI protobufs.
-Therefore, the CO SHALL reconcile successful capability-validation responses by comparing the validated capabilities with those that it had originally requested.
+注意: 古いプラグインは、CSI protobuf のより新しい後方互換バージョンを用いて通信している CO により送信された機能検証メッセージ(とサブメッセージ)中に存在しても良い(MAY)新しい「process」フィールドをパースはするがおそらく「処理」はしないだろう。
+したがって、CO は元々要求されたケーパビリティと検証されたケーパビリティを比較する事で、成功したケーパビリティ検証応答をすべきである(SHALL)。
 
 ```protobuf
 message ValidateVolumeCapabilitiesRequest {
@@ -1431,23 +1433,23 @@ message ValidateVolumeCapabilitiesResponse {
 }
 ```
 
-##### ValidateVolumeCapabilities Errors
+##### ValidateVolumeCapabilities エラー
 
-If the plugin is unable to complete the ValidateVolumeCapabilities call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが ValidateVolumeCapabilities コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Volume does not exist | 5 NOT_FOUND | Indicates that a volume corresponding to the specified `volume_id` does not exist. | Caller MUST verify that the `volume_id` is correct and that the volume is accessible and has not been deleted before retrying with exponential back off. |
+| ボリュームが存在しない | 5 NOT_FOUND | 指定された `volume_id` に関連付けられたボリュームが存在しない事を示す。 | 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元は `volume_id` が正しく、ボリュームがアクセス可能で削除されていない事を検証しなければならない(MUST)。 |
 
 
 #### `ListVolumes`
 
-A Controller Plugin MUST implement this RPC call if it has `LIST_VOLUMES` capability.
-The Plugin SHALL return the information about all the volumes that it knows about.
-If volumes are created and/or deleted while the CO is concurrently paging through `ListVolumes` results then it is possible that the CO MAY either witness duplicate volumes in the list, not witness existing volumes, or both.
-The CO SHALL NOT expect a consistent "view" of all volumes when paging through the volume list via multiple calls to `ListVolumes`.
+`LIST_VOLUMES` ケーパビリティを持つコントローラープラグインは本 RPC コールを実装しなければならない。
+プラグインは自身が把握している全ボリュームに関する情報を返却すべきである(SHALL)。
+CO が並行して `ListVolumes` の結果をページ単位にしている間にボリュームが作成/削除された場合、CO はリスト中に重複したボリュームを証言するか、既存のボリュームを証言しないか、その両方を行うかのいずれでも良い(MAY)。
+`ListVolumes` の複数コールを介してボリューム一覧をページングする際、CO は全ボリュームの一貫した「ビュー」を想定すべきではない(SHALL NOT)。
 
 ```protobuf
 message ListVolumesRequest {
@@ -1511,28 +1513,28 @@ message ListVolumesResponse {
 }
 ```
 
-##### ListVolumes Errors
+##### ListVolumes エラー
 
-If the plugin is unable to complete the ListVolumes call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが ListVolumes コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Invalid `starting_token` | 10 ABORTED | Indicates that `starting_token` is not valid. | Caller SHOULD start the `ListVolumes` operation again with an empty `starting_token`. |
+| `starting_token` 無効 | 10 ABORTED | `starting_token` が有効でない事を示す。 | 呼び出し元は空の `starting_token` を用いて `ListVolumes` 操作を再び実行すべきである(SHOULD)。 |
 
 #### `ControllerGetVolume`
 
-**ALPHA FEATURE**
+**α版機能**
 
-This optional RPC MAY be called by the CO to fetch current information about a volume.
+オプションの本 RPC は、1ボリュームの現在の情報を取得するために CO によってコールされる。
 
-A Controller Plugin MUST implement this `ControllerGetVolume` RPC call if it has `GET_VOLUME` capability.
+`GET_VOLUME` ケーパビリティを持つ場合、コントローラープラグインはこの `ControllerGetVolume` RPC コールを実装しなければならない(MUST)。
 
-A Controller Plugin MUST provide a non-empty `volume_condition` field in `ControllerGetVolumeResponse` if it has `VOLUME_CONDITION` capability.
+`VOLUME_CONDITION` ケーパビリティを保つ場合、コントローラープラグインは `ControllerGetVolumeResponse` 中の空でない `volume_condition` フィールドを提供しなければならない(MUST)。
 
-`ControllerGetVolumeResponse` should contain current information of a volume if it exists.
-If the volume does not exist any more, `ControllerGetVolume` should return gRPC error code `NOT_FOUND`.
+ボリュームが存在する場合、`ControllerGetVolumeResponse` はボリュームの現在の情報を含むべきである(SHOULD)。
+ボリュームが最早存在しない場合、 `ControllerGetVolume` は gRPC エラーコード `NOT_FOUND` を返却すべきである(should)。
 
 ```protobuf
 message ControllerGetVolumeRequest {
@@ -1571,20 +1573,20 @@ message ControllerGetVolumeResponse {
 }
 ```
 
-##### ControllerGetVolume Errors
+##### ControllerGetVolume エラー
 
-If the plugin is unable to complete the ControllerGetVolume call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが ControllerGetVolume コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Volume does not exist | 5 NOT_FOUND | Indicates that a volume corresponding to the specified `volume_id` does not exist. | Caller MUST verify that the `volume_id` is correct and that the volume is accessible and has not been deleted before retrying with exponential back off. |
+| ボリュームが存在しない | 5 NOT_FOUND | 指定された `volume_id` に関連付けられたボリュームが存在しない事を示す。 | 急激に時間間隔を伸ばす再試行を行う前に、呼び出し元は `volume_id` が正しい事、ボリュームがアクセス可能で削除されていない事を検証しなければならない(MUST)。 |
 
 #### `GetCapacity`
 
-A Controller Plugin MUST implement this RPC call if it has `GET_CAPACITY` controller capability.
-The RPC allows the CO to query the capacity of the storage pool from which the controller provisions volumes.
+`GET_CAPACITY` コントローラーケーパビリティを保つ場合、コントローラープラグインは本 RPC コールを実装しなければならない。
+本 RPC は、コントローラーがボリュームをプロビジョンするストレージプールの容量を CO が問い合わせられるようにする。
 
 ```protobuf
 message GetCapacityRequest {
@@ -1656,13 +1658,13 @@ message GetCapacityResponse {
 }
 ```
 
-##### GetCapacity Errors
+##### GetCapacity エラー
 
-If the plugin is unable to complete the GetCapacity call successfully, it MUST return a non-ok gRPC code in the gRPC status.
+プラグインが GetCapacity コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
 
 #### `ControllerGetCapabilities`
 
-A Controller Plugin MUST implement this RPC call. This RPC allows the CO to check the supported capabilities of controller service provided by the Plugin.
+コントローラープラグインは本 RPC コールを実装しなければならない(MUST)。本 RPC は、CO がプラグインによって提供されるコントローラーサービスがサポートするケーパビリティをチェックできるようにする。
 
 ```protobuf
 message ControllerGetCapabilitiesRequest {
@@ -1751,50 +1753,50 @@ message ControllerServiceCapability {
 
 ##### ControllerGetCapabilities Errors
 
-If the plugin is unable to complete the ControllerGetCapabilities call successfully, it MUST return a non-ok gRPC code in the gRPC status.
+プラグインが ControllerGetCapabilities コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
 
 #### `CreateSnapshot`
 
-A Controller Plugin MUST implement this RPC call if it has `CREATE_DELETE_SNAPSHOT` controller capability.
-This RPC will be called by the CO to create a new snapshot from a source volume on behalf of a user.
+`CREATE_DELETE_SNAPSHOT` コントローラーケーパビリティを持つ場合、コントローラープラグインは本 RPC コールを実装しなければならない(MUST)。
+ユーザの代わりに CO が元ボリュームからスナップショットを作成する為、本 RPC は CO によりコールされる。
 
-This operation MUST be idempotent.
-If a snapshot corresponding to the specified snapshot `name` is successfully cut and ready to use (meaning it MAY be specified as a `volume_content_source` in a `CreateVolumeRequest`), the Plugin MUST reply `0 OK` with the corresponding `CreateSnapshotResponse`.
+本操作は冪等性を持たなければならない(MUST)。
+指定したスナップショット `name` に関連付けられたスナップショットが無事作成され使用可能な場合(つまり、`CreateVolumeRequest` 中の `volume_content_source` で指定できる(MAY))、プラグインは関連する `CreateSnapshotResponse` で `0 OK` を返却しなければならない(MUST)。
 
-If an error occurs before a snapshot is cut, `CreateSnapshot` SHOULD return a corresponding gRPC error code that reflects the error condition.
+スナップショットが作成される前にエラーが発生した場合、`CreateSnapshot` はエラー状況を反映した関連 gRPC エラーコードを返却すべきである(SHOULD)。
 
-For plugins that supports snapshot post processing such as uploading, `CreateSnapshot` SHOULD return `0 OK` and `ready_to_use` SHOULD be set to `false` after the snapshot is cut but still being processed.
-CO SHOULD then reissue the same `CreateSnapshotRequest` periodically until boolean `ready_to_use` flips to `true` indicating the snapshot has been "processed" and is ready to use to create new volumes.
-If an error occurs during the process, `CreateSnapshot` SHOULD return a corresponding gRPC error code that reflects the error condition.
+アップロードのようなスナップショットの後工程をサポートするプラグインの為、`CreateSnapshot` は `0 OK` を返却し(SHOULD)、スナップショット作成後に依然処理中だった場合は `ready_to_use` を `false` にセットすべきである(SHOULD)。
+スナップショット作成が「処理済み」であり、新しいボリューム作成に使用可能である事を示す `ready_to_use` が `true` に切り替わるまで、CO は `CreateSnapshotRequest` を定期的に再実行すべきである(SHOULD)
+処理中にエラーが発生した場合、`CreateSnapshot` はエラー状況を反映した関連 gRPC エラーコードを返却すべきである(SHOULD)。
 
-A snapshot MAY be used as the source to provision a new volume.
-A CreateVolumeRequest message MAY specify an OPTIONAL source snapshot parameter.
-Reverting a snapshot, where data in the original volume is erased and replaced with data in the snapshot, is an advanced functionality not every storage system can support and therefore is currently out of scope.
+スナップショットは新しいボリュームを生成する為のソースとして使用できる(MAY)。
+CreateVolumeRequest メッセージは省略可能(OPTIONAL)な元スナップショットパラメータを指定しても良い(MAY)。
+スナップショットを戻す(元ボリューム中のデータを削除し、スナップショット中のデータで置き換える)事は先進的な機能であり、全てのストレージシステムがサポートするものではなく、それゆえ本機能は現在スコープ外です。
 
-##### The ready_to_use Parameter
+##### ready_to_use パラメーター
 
-Some SPs MAY "process" the snapshot after the snapshot is cut, for example, maybe uploading the snapshot somewhere after the snapshot is cut.
-The post-cut process MAY be a long process that could take hours.
-The CO MAY freeze the application using the source volume before taking the snapshot.
-The purpose of `freeze` is to ensure the application data is in consistent state.
-When `freeze` is performed, the container is paused and the application is also paused.
-When `thaw` is performed, the container and the application start running again.
-During the snapshot processing phase, since the snapshot is already cut, a `thaw` operation can be performed so application can start running without waiting for the process to complete.
-The `ready_to_use` parameter of the snapshot will become `true` after the process is complete.
+スナップショット作成後にスナップショットをどこかにアップロードするなど、スナップショット作成後にいくつかの SP はスナップショットを「処理」できる(MAY)。
+作成後処理は数時間かかるような長時間処理になりうる(MAY)。
+CO はスナップショットを取得する前に元ボリュームを使用するアプリケーションをフリーズさせる可能性がある(MAY)。
+`freeze` の目的はアプリケーションデータが一貫性ある状態である事を保証する事です。
+`freeze` 実行の際、コンテナは一旦停止し、アプリケーションも一旦停止します。
+`thaw` 実行の際、コンテナとアプリケーションは再び実行し始めます。
+スナップショット作成フェーズの間、スナップショットが既に作成されていたら、`thaw` 操作は実行可能で、そのため処理が完了するのを待つ事なくアプリケーションは実行開始できます。
+処理完了後、スナップショットの `ready_to_use` パラメータは `true` になります。
 
-For SPs that do not do additional processing after cut, the `ready_to_use` parameter SHOULD be `true` after the snapshot is cut.
-`thaw` can be done when the `ready_to_use` parameter is `true` in this case.
+スナップショット作成後に追加処理を行わない SP の為、スナップショット作成後 `ready_to_use` は `true` になるべきである(SHOULD)。
+この場合、`ready_to_use` パラメータが `true` になった時、`thaw` は実行できる。
 
-The `ready_to_use` parameter provides guidance to the CO on when it can "thaw" the application in the process of snapshotting.
-If the cloud provider or storage system needs to process the snapshot after the snapshot is cut, the `ready_to_use` parameter returned by CreateSnapshot SHALL be `false`.
-CO MAY continue to call CreateSnapshot while waiting for the process to complete until `ready_to_use` becomes `true`.
-Note that CreateSnapshot no longer blocks after the snapshot is cut.
+スナップショット中の処理で CO がアプリケーションを「温める(thaw)」事が出来る際に、`ready_to_use` パラメータは CO にガイダンスを与える。
+スナップショット作成後にクラウドプロバイダあるいはストレージシステムがスナップショットを処理する必要がある場合、CreateSnapshot により返却される `ready_to_use` パラメータは `false` であるべきである(SHALL)。
+`ready_to_use` が `true` になるまで処理完了を待つ間、CO は　CreateSnapshot をコールし続けても良い(MAY)。
+スナップショット作成御、CreateSnapshot は最早ブロックしないことに注意。
 
-A gRPC error code SHALL be returned if an error occurs during any stage of the snapshotting process.
-A CO SHOULD explicitly delete snapshots when an error occurs.
+スナップショット処理のいずれの段階中でエラーが発生した場合、gRPC エラーコードが返却されるべきである(SHALL)。
+エラー発生時、CO は明確にスナップショットを削除すべきである(SHOULD)。
 
-Based on this information, CO can issue repeated (idempotent) calls to CreateSnapshot, monitor the response, and make decisions.
-Note that CreateSnapshot is a synchronous call and it MUST block until the snapshot is cut.
+この情報に基づき、CO は CreateSnapshot のコールを繰り返し(冪等性)発行し、応答を監視し、判断できる(can)。
+CreateSnapshot は同期コールであり、スナップショットが作成されるまでブロックされなければならない(MUST)事に注意。
 
 ```protobuf
 message CreateSnapshotRequest {
@@ -1873,17 +1875,22 @@ message Snapshot {
 }
 ```
 
-##### CreateSnapshot Errors
+##### CreateSnapshot エラー
 
-If the plugin is unable to complete the CreateSnapshot call successfully, it MUST return a non-ok gRPC code in the gRPC status.
-If the conditions defined below are encountered, the plugin MUST return the specified gRPC error code.
-The CO MUST implement the specified error recovery behavior when it encounters the gRPC error code.
+プラグインが CreateSnapshot コールを無事完了できない場合、プラグインは gRPC ステータス中で non-ok gRPC コードを返却しなければならない(MUST)。
+下記で定義された状況に遭遇した場合、プラグインは指定された gRPC エラーコードを返却しなければならない(MUST)。
+CO は、gRPC エラーコードに遭遇した際の指定されたエラー復旧動作を実装しなければならない(MUST)。
 
-| Condition | gRPC Code | Description | Recovery Behavior |
+| 状況 | gRPC コード | 説明 | 復旧動作 |
 |-----------|-----------|-------------|-------------------|
-| Snapshot already exists but is incompatible | 6 ALREADY_EXISTS | Indicates that a snapshot corresponding to the specified snapshot `name` already exists but is incompatible with the specified `volume_id`. | Caller MUST fix the arguments or use a different `name` before retrying. |
-| Operation pending for snapshot | 10 ABORTED | Indicates that there is already an operation pending for the specified snapshot. In general the Cluster Orchestrator (CO) is responsible for ensuring that there is no more than one call "in-flight" per snapshot at a given time. However, in some circumstances, the CO MAY lose state (for example when the CO crashes and restarts), and MAY issue multiple calls simultaneously for the same snapshot. The Plugin, SHOULD handle this as gracefully as possible, and MAY return this error code to reject secondary calls. | Caller SHOULD ensure that there are no other calls pending for the specified snapshot, and then retry with exponential back off. |
-| Not enough space to create snapshot | 13 RESOURCE_EXHAUSTED | There is not enough space on the storage system to handle the create snapshot request. | Caller SHOULD fail this request. Future calls to CreateSnapshot MAY succeed if space is freed up. |
+| スナップショットは既に存在するが非互換である | 6 ALREADY_EXISTS | 指定されたスナップショット `name` に関連付けられたスナップショット既に存在するが、指定された `volume_id` と一致しない。 | 呼び出し元は再試行前に引数を修正するか異なる `name` を使用しなければならない(MUST)。 |
+| スナップショットの操作が保留中 | 10 ABORTED | 指定されたスナップショットの保留中の操作が既にある事を示す。
+一般に、CO はある瞬間にスナップショットに対して「実行中の」コールが複数ない事を保証する責任を持つ。
+
+しかし、(例えば、CO がクラッシュして再起動した場合など) 状況によっては CO が状態を失う可能背があり(MAY)、同じスナップショットに対して同時に複数の呼び出しを発行する可能性がある(MAY)。
+プラグイン は可能な限り穏便にこの問題を扱うべきであり(SHOULD)、2番目の呼び出しを拒否する為にこのエラーコードを返却する事ができる(MAY)。 | 
+呼び出し元は特定のスナップショットに対して他の保留中の呼び出しがない事を保証し、その後指数バックオフで再試行すべきである(SHOULD)。 |
+| スナップショット作成のための十分なスペースがない | 13 RESOURCE_EXHAUSTED | スナップショット作成要求を処理する為の、ストレージシステム上の十分なスペースがない。 | 呼び出し元はこの要求を失敗とすべきである(SHOULD)。今後スペースが開放された場合、CreateSnapshot 呼び出しは成功する可能性がある(MAY)。 |
 
 
 #### `DeleteSnapshot`
